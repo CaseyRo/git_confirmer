@@ -16,10 +16,16 @@ Build once with Rust:
 cargo build --release --manifest-path ./Cargo.toml
 ```
 
-Optionally add the wrapper to PATH:
+Install as a proper cargo binary (recommended):
 
 ```bash
-sudo ln -s /Users/caseyromkes/dev/git_confirmer/git-confirmer.sh /usr/local/bin/git_confirmer
+cargo install --path .
+```
+
+Convenience wrapper:
+
+```bash
+./install.sh
 ```
 
 Add a convenient alias in `~/.zshrc`:

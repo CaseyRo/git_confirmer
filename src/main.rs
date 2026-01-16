@@ -95,6 +95,7 @@ struct App {
     gen_done: usize,
     gen_errors: usize,
     gen_receiver: Option<Receiver<GenEvent>>,
+    ai_enabled: bool,
 }
 
 #[derive(Clone, Debug, Default, Deserialize)]
@@ -108,6 +109,10 @@ impl App {
     fn new(roots: Vec<PathBuf>, base_message: String, theme_path: Option<PathBuf>) -> io::Result<Self> {
         let repos = scan_repos(&roots)?;
         let theme = load_theme(theme_path).unwrap_or_else(|_| default_theme());
+        let ai_enabled = match std::env::var("OPENAI_API_KEY") {
+            Ok(value) => !value.trim().is_empty(),
+            Err(_) => false,
+        };
         let mut table_state = TableState::default();
         if !repos.is_empty() {
             table_state.select(Some(0));
@@ -127,6 +132,7 @@ impl App {
             gen_done: 0,
             gen_errors: 0,
             gen_receiver: None,
+            ai_enabled,
         })
     }
 
@@ -445,7 +451,13 @@ fn handle_key(app: &mut App, key: KeyEvent) -> io::Result<bool> {
             KeyCode::Char('a') => app.select_dirty(),
             KeyCode::Char('n') => app.clear_selection(),
             KeyCode::Char('e') => app.begin_edit_comment(),
-            KeyCode::Char('g') => app.start_generation(),
+            KeyCode::Char('g') => {
+                if app.ai_enabled {
+                    app.start_generation();
+                } else {
+                    app.status = String::from("OPENAI_API_KEY not set.");
+                }
+            }
             KeyCode::Char('c') => app.commit_selected(),
             KeyCode::Char('r') => {
                 if app.gen_active {
@@ -563,17 +575,21 @@ fn render(frame: &mut ratatui::Frame, app: &mut App) {
     frame.render_stateful_widget(table, layout[0], &mut app.table_state);
 
     let footer = match app.mode {
-        Mode::Normal => Line::from(vec![
-            Span::raw("q quit  "),
-            Span::raw("up/down or j/k move  "),
-            Span::raw("space toggle  "),
-            Span::raw("a select dirty  "),
-            Span::raw("n clear  "),
-            Span::raw("e comment  "),
-            Span::raw("g generate  "),
-            Span::raw("c commit  "),
-            Span::raw("r rescan"),
-        ]),
+        Mode::Normal => {
+            let mut spans = Vec::new();
+            spans.push(Span::raw("q quit  "));
+            spans.push(Span::raw("up/down or j/k move  "));
+            spans.push(Span::raw("space toggle  "));
+            spans.push(Span::raw("a select dirty  "));
+            spans.push(Span::raw("n clear  "));
+            spans.push(Span::raw("e comment  "));
+            if app.ai_enabled {
+                spans.push(Span::raw("g generate  "));
+            }
+            spans.push(Span::raw("c commit  "));
+            spans.push(Span::raw("r rescan"));
+            Line::from(spans)
+        }
         Mode::EditingComment => Line::from(Span::raw("Editing comment: enter to save, esc to cancel")),
     };
 
@@ -919,15 +935,15 @@ fn sanitize_message(value: &str) -> String {
 
 fn default_theme() -> Theme {
     Theme {
-        background: Color::Rgb(240, 232, 233), // Cloud Dancer
-        foreground: Color::Rgb(39, 47, 56),    // Carbon
+        background: Color::Rgb(39, 47, 56),    // Carbon
+        foreground: Color::Rgb(240, 232, 233), // Cloud Dancer
         header_bg: Color::Rgb(31, 93, 160),    // Strong Blue
         header_fg: Color::Rgb(240, 232, 233),  // Cloud Dancer
         highlight_bg: Color::Rgb(122, 182, 217), // Baltic Sea
         highlight_fg: Color::Rgb(240, 232, 233), // Cloud Dancer
         dirty_fg: Color::Rgb(31, 93, 160),     // Strong Blue
         clean_fg: Color::Rgb(92, 198, 195),    // Rinsing Rivulet
-        status_fg: Color::Rgb(39, 47, 56),     // Carbon
+        status_fg: Color::Rgb(240, 232, 233),  // Cloud Dancer
         error_fg: Color::Rgb(31, 93, 160),     // Strong Blue
         border_fg: Color::Rgb(197, 192, 208),  // Lavender Blue
     }
