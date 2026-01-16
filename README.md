@@ -47,6 +47,18 @@ Default scan root is `~/dev` when no args are provided.
 ./git-confirmer.sh --root ~/dev --message "all changes in files"
 ```
 
+Show flags:
+
+```bash
+git_confirmer -?
+```
+
+Quick add/commit/push with a comment:
+
+```bash
+git_confirmer --ship "cleanup"
+```
+
 Key bindings:
 - `j/k` or arrows: move
 - `space`: toggle selection

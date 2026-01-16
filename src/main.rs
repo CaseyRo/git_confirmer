@@ -405,7 +405,10 @@ impl App {
 }
 
 fn main() -> io::Result<()> {
-    let (roots, base_message, config) = parse_args()?;
+    let (roots, base_message, config, quick_comment) = parse_args()?;
+    if let Some(comment) = quick_comment {
+        return quick_commit_and_push(roots, base_message, comment);
+    }
     let theme_path = config.theme_path.map(|value| expand_tilde(&value));
     let mut app = App::new(roots, base_message, theme_path)?;
 
@@ -422,6 +425,72 @@ fn main() -> io::Result<()> {
     terminal.show_cursor()?;
 
     result
+}
+
+fn quick_commit_and_push(
+    roots: Vec<PathBuf>,
+    base_message: String,
+    comment: String,
+) -> io::Result<()> {
+    let repos = scan_repos(&roots)?;
+    let mut committed = 0;
+    let mut skipped = 0;
+    let mut errors = 0;
+    let mut last_error = String::new();
+    let trimmed = comment.trim();
+    let message = if trimmed.is_empty() {
+        base_message
+    } else {
+        format!("{} - {}", base_message, trimmed)
+    };
+
+    for repo in repos {
+        match has_changes(&repo.path) {
+            Ok(false) => {
+                skipped += 1;
+                continue;
+            }
+            Err(err) => {
+                errors += 1;
+                last_error = format!("{}: {}", repo.name, err);
+                continue;
+            }
+            Ok(true) => {}
+        }
+
+        if let Err(err) = run_git(&repo.path, ["add", "-A"]) {
+            errors += 1;
+            last_error = format!("{}: add failed ({})", repo.name, err);
+            continue;
+        }
+
+        if let Err(err) = run_git(&repo.path, ["commit", "-m", &message]) {
+            errors += 1;
+            last_error = format!("{}: commit failed ({})", repo.name, err);
+            continue;
+        }
+
+        if let Err(err) = run_git(&repo.path, ["push"]) {
+            errors += 1;
+            last_error = format!("{}: push failed ({})", repo.name, err);
+            continue;
+        }
+
+        committed += 1;
+    }
+
+    if committed == 0 && skipped == 0 && errors == 0 {
+        println!("No repositories found.");
+    } else if errors > 0 {
+        println!(
+            "Committed and pushed {}, skipped {}, errors {}. Last error: {}",
+            committed, skipped, errors, last_error
+        );
+    } else {
+        println!("Committed and pushed {}, skipped {}.", committed, skipped);
+    }
+
+    Ok(())
 }
 
 fn run_tui(terminal: &mut Terminal<CrosstermBackend<Stdout>>, app: &mut App) -> io::Result<()> {
@@ -615,7 +684,7 @@ fn render(frame: &mut ratatui::Frame, app: &mut App) {
     frame.render_widget(footer_block, layout[1]);
 }
 
-fn parse_args() -> io::Result<(Vec<PathBuf>, String, FileConfig)> {
+fn parse_args() -> io::Result<(Vec<PathBuf>, String, FileConfig, Option<String>)> {
     let config = load_config().unwrap_or_default();
     let mut args = std::env::args().skip(1).peekable();
     let mut roots: Vec<PathBuf> = config
@@ -629,9 +698,19 @@ fn parse_args() -> io::Result<(Vec<PathBuf>, String, FileConfig)> {
         .base_message
         .clone()
         .unwrap_or_else(|| String::from("all changes in files"));
+    let mut quick_comment: Option<String> = None;
 
     while let Some(arg) = args.next() {
         match arg.as_str() {
+            "-?" | "--help" | "-h" => {
+                print_help();
+                std::process::exit(0);
+            }
+            "--ship" | "-s" => {
+                if let Some(value) = args.next() {
+                    quick_comment = Some(value);
+                }
+            }
             "--root" | "-r" => {
                 if let Some(value) = args.next() {
                     roots.push(expand_tilde(&value));
@@ -651,7 +730,22 @@ fn parse_args() -> io::Result<(Vec<PathBuf>, String, FileConfig)> {
         roots.push(default_root.join("dev"));
     }
 
-    Ok((roots, base_message, config))
+    Ok((roots, base_message, config, quick_comment))
+}
+
+fn print_help() {
+    println!("git_confirmer - scan and batch commit git repos");
+    println!();
+    println!("Usage:");
+    println!("  git_confirmer [OPTIONS] [ROOTS...]");
+    println!();
+    println!("Options:");
+    println!("  -r, --root <path>       Add a root folder to scan");
+    println!("  -m, --message <text>    Set base commit message");
+    println!("  -s, --ship <comment>    Add, commit, and push dirty repos with a comment");
+    println!("  -?, -h, --help          Show this help");
+    println!();
+    println!("Default root: ~/dev when no roots are provided");
 }
 
 fn expand_tilde(value: &str) -> PathBuf {
