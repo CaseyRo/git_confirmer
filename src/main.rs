@@ -107,7 +107,7 @@ struct FileConfig {
 impl App {
     fn new(roots: Vec<PathBuf>, base_message: String, theme_path: Option<PathBuf>) -> io::Result<Self> {
         let repos = scan_repos(&roots)?;
-        let theme = load_theme(theme_path).unwrap_or_else(default_theme);
+        let theme = load_theme(theme_path).unwrap_or_else(|_| default_theme());
         let mut table_state = TableState::default();
         if !repos.is_empty() {
             table_state.select(Some(0));
@@ -340,11 +340,21 @@ impl App {
     }
 
     fn process_gen_events(&mut self) {
-        let Some(rx) = self.gen_receiver.as_ref() else {
-            return;
-        };
+        loop {
+            let event = match self.gen_receiver.as_ref() {
+                Some(rx) => match rx.try_recv() {
+                    Ok(event) => event,
+                    Err(std::sync::mpsc::TryRecvError::Empty) => break,
+                    Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                        self.gen_active = false;
+                        self.gen_receiver = None;
+                        self.status = String::from("Generation channel closed.");
+                        break;
+                    }
+                },
+                None => break,
+            };
 
-        while let Ok(event) = rx.try_recv() {
             match event {
                 GenEvent::Started(path) => {
                     if let Some(repo) = self.repos.iter_mut().find(|repo| repo.path == path) {
