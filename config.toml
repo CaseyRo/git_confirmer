@@ -1,0 +1,4 @@
+# Git Confirmer config
+# roots = ["~/dev", "~/work"]
+# base_message = "all changes in files"
+# theme_path = "./theme.conf"
