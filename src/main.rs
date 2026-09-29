@@ -346,19 +346,16 @@ impl App {
     }
 
     fn process_gen_events(&mut self) {
-        loop {
-            let event = match self.gen_receiver.as_ref() {
-                Some(rx) => match rx.try_recv() {
-                    Ok(event) => event,
-                    Err(std::sync::mpsc::TryRecvError::Empty) => break,
-                    Err(std::sync::mpsc::TryRecvError::Disconnected) => {
-                        self.gen_active = false;
-                        self.gen_receiver = None;
-                        self.status = String::from("Generation channel closed.");
-                        break;
-                    }
-                },
-                None => break,
+        while let Some(rx) = self.gen_receiver.as_ref() {
+            let event = match rx.try_recv() {
+                Ok(event) => event,
+                Err(std::sync::mpsc::TryRecvError::Empty) => break,
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                    self.gen_active = false;
+                    self.gen_receiver = None;
+                    self.status = String::from("Generation channel closed.");
+                    break;
+                }
             };
 
             match event {
@@ -561,7 +558,7 @@ fn render(frame: &mut ratatui::Frame, app: &mut App) {
     let layout = Layout::default()
         .direction(Direction::Vertical)
         .constraints([Constraint::Min(5), Constraint::Length(4)])
-        .split(frame.size());
+        .split(frame.area());
 
     let header = Row::new(vec![
         Cell::from("Sel"),
@@ -634,7 +631,7 @@ fn render(frame: &mut ratatui::Frame, app: &mut App) {
             .border_style(Style::default().fg(theme.border_fg).bg(theme.background)),
     )
     .style(Style::default().fg(theme.foreground).bg(theme.background))
-    .highlight_style(
+    .row_highlight_style(
         Style::default()
             .fg(theme.highlight_fg)
             .bg(theme.highlight_bg)
@@ -645,13 +642,14 @@ fn render(frame: &mut ratatui::Frame, app: &mut App) {
 
     let footer = match app.mode {
         Mode::Normal => {
-            let mut spans = Vec::new();
-            spans.push(Span::raw("q quit  "));
-            spans.push(Span::raw("up/down or j/k move  "));
-            spans.push(Span::raw("space toggle  "));
-            spans.push(Span::raw("a select dirty  "));
-            spans.push(Span::raw("n clear  "));
-            spans.push(Span::raw("e comment  "));
+            let mut spans = vec![
+                Span::raw("q quit  "),
+                Span::raw("up/down or j/k move  "),
+                Span::raw("space toggle  "),
+                Span::raw("a select dirty  "),
+                Span::raw("n clear  "),
+                Span::raw("e comment  "),
+            ];
             if app.ai_enabled {
                 spans.push(Span::raw("g generate  "));
             }
@@ -794,8 +792,7 @@ fn read_repo(path: &Path) -> io::Result<Repo> {
         .output()?;
 
     if !output.status.success() {
-        return Err(io::Error::new(
-            io::ErrorKind::Other,
+        return Err(io::Error::other(
             String::from_utf8_lossy(&output.stderr).trim().to_string(),
         ));
     }
@@ -876,8 +873,7 @@ fn has_changes(path: &Path) -> io::Result<bool> {
         .output()?;
 
     if !output.status.success() {
-        return Err(io::Error::new(
-            io::ErrorKind::Other,
+        return Err(io::Error::other(
             String::from_utf8_lossy(&output.stderr).trim().to_string(),
         ));
     }
@@ -899,8 +895,7 @@ where
     if output.status.success() {
         Ok(())
     } else {
-        Err(io::Error::new(
-            io::ErrorKind::Other,
+        Err(io::Error::other(
             String::from_utf8_lossy(&output.stderr).trim().to_string(),
         ))
     }
@@ -934,18 +929,17 @@ fn generate_commit_message(path: &Path, config: &GenConfig) -> io::Result<String
         Ok(response) => response,
         Err(ureq::Error::Status(code, response)) => {
             let body = response.into_string().unwrap_or_default();
-            return Err(io::Error::new(
-                io::ErrorKind::Other,
+            return Err(io::Error::other(
                 format!("OpenAI {}: {}", code, body.trim()),
             ));
         }
         Err(err) => {
-            return Err(io::Error::new(io::ErrorKind::Other, err.to_string()));
+            return Err(io::Error::other(err.to_string()));
         }
     };
 
     let payload: serde_json::Value = response.into_json().map_err(|err| {
-        io::Error::new(io::ErrorKind::Other, format!("Parse error: {}", err))
+        io::Error::other(format!("Parse error: {}", err))
     })?;
 
     let content = payload["choices"][0]["message"]["content"]
@@ -954,8 +948,7 @@ fn generate_commit_message(path: &Path, config: &GenConfig) -> io::Result<String
         .trim();
 
     if content.is_empty() {
-        return Err(io::Error::new(
-            io::ErrorKind::Other,
+        return Err(io::Error::other(
             "Empty response from OpenAI",
         ));
     }
@@ -992,8 +985,7 @@ where
     if output.status.success() {
         Ok(String::from_utf8_lossy(&output.stdout).to_string())
     } else {
-        Err(io::Error::new(
-            io::ErrorKind::Other,
+        Err(io::Error::other(
             String::from_utf8_lossy(&output.stderr).trim().to_string(),
         ))
     }
@@ -1110,8 +1102,7 @@ fn load_config() -> Option<FileConfig> {
 fn read_config(path: &Path) -> io::Result<FileConfig> {
     let contents = std::fs::read_to_string(path)?;
     let config: FileConfig = toml::from_str(&contents).map_err(|err| {
-        io::Error::new(
-            io::ErrorKind::Other,
+        io::Error::other(
             format!("config parse error: {}", err),
         )
     })?;
